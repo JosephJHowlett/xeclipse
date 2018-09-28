@@ -19,15 +19,19 @@ import corner
 class ELifetimeFitter(object):
     def __init__(self, **kwargs):
         self.name = kwargs.get('name', 'ELifetimeFit')
-        self.flow_g = kwargs.get('gas_flow_slps', 10.0/60) # SL/sec
-        self.flow_l = kwargs.get('liquid_flow_lps', (5.894/1000/2.942)*30.0/60) # liters/sec
-        self.LXe_density = 2.942 # kg/liter
-        self.GXe_density = 5.894/1000 # kg/SL (depends on PT01)
-        self.m_l = kwargs.get('m_l', 30.47) # kg
-        self.m_g = kwargs.get('m_g', .240) # kg
+        self.flow_g = kwargs.get('gas_flow_slps', 10.0/60)  # SL/sec
+        self.flow_l = kwargs.get(
+            'liquid_flow_lps',
+            (5.894/1000/2.942)*30.0/60
+            )  # liters/sec
+        self.LXe_density = 2.942  # kg/liter
+        self.GXe_density = 5.894/1000  # kg/SL (depends on PT01)
+        self.m_l = kwargs.get('m_l', 30.47)  # kg
+        self.m_g = kwargs.get('m_g', .240)  # kg
         self.get_RHSs = kwargs.get('get_RHSs', self.standard_model)
 
-        self.fit_initial_values = np.asarray(kwargs.get('fit_initial_values', [None]*10))
+        self.fit_initial_values = np.asarray(
+            kwargs.get('fit_initial_values', [None]*10))
 
         self.odeint_kwargs = kwargs.get('odeint_kwargs', {})
 
@@ -63,22 +67,6 @@ class ELifetimeFitter(object):
             upper_ranges[i] = self.p0[par_name]['range'][1]
         return lower_ranges, upper_ranges
 
-    def get_RHSs_simple(self, Is, t, p):
-        """Simplified (liquid-only, fixed outgassing) model
-
-        Takes in the list of impurity concentrations (1/lifetimes),
-        The time since zero, for time-dependent pars (does this make sense?),
-        and a dictionary of free parameters.
-        """
-        I_g = Is[0]
-        I_l = Is[1]
-        outgassing_liquid = p['O_l']
-        dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau']) + # liters/sec*kg/liter
-                    outgassing_liquid
-                    ) / self.m_l
-        RHSs = [0, dI_l_dt]
-        return RHSs
-
     def standard_model(self, Is, t, p, verbose=False):
         """The model itself.
 
@@ -100,7 +88,7 @@ class ELifetimeFitter(object):
                     migration_gl +
                     outgassing_liquid
                     ) / self.m_l
-        RHSs = [dI_g_dt, dI_l_dt]
+        RHSs = [dI_l_dt, dI_g_dt]
         return RHSs
 
     def solve_ODEs(self, times, taus, p, initial_values, verbose=False):
@@ -218,7 +206,6 @@ class ELifetimeFitter(object):
         # chain is (walkers, steps, pars)
         samples = self.chain[:,-nb_iters:,:].reshape(-1, self.chain.shape[-1])
         names = [self.p0[name].get('latex_name', name) for name in self.p0.keys()]
-        print(names)
         corner.corner(
             samples,
             labels=names,
@@ -486,21 +473,21 @@ if __name__=='__main__':
     new = True
     if new:
         fitter = ELifetimeFitter(
-                    name=pickle_filename.split('.pkl')[0],
-                    nb_walkers=nb_walkers,
-                    p0=p0,
-                    function_to_explore='chi2',
-                    liquid_flow_lps=liquid_flow_lps,
-                    )
+            name=pickle_filename.split('.pkl')[0],
+            nb_walkers=nb_walkers,
+            p0=p0,
+            function_to_explore='chi2',
+            liquid_flow_lps=liquid_flow_lps,
+            )
     else:
         fitter = ELifetimeFitter(
-                    name=pickle_filename.split('.pkl')[0],
-                    nb_walkers=nb_walkers,
-                    function_to_explore='chi2',
-                    start_from_dict=pickle_filename,
-                    p0=p0,
-                    liquid_flow_lps=liquid_flow_lps,
-                    )
+            name=pickle_filename.split('.pkl')[0],
+            nb_walkers=nb_walkers,
+            function_to_explore='chi2',
+            start_from_dict=pickle_filename,
+            p0=p0,
+            liquid_flow_lps=liquid_flow_lps,
+            )
     if fit:
         fitter.run_sampler(nb_steps, (times, taus))
     print(np.shape(fitter.chain))
