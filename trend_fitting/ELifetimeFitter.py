@@ -338,13 +338,12 @@ class ELifetimeModeler(ELifetimeFitter):
         The time since zero, for time-dependent pars (does this make sense?),
         and a dictionary of free parameters.
         """
-        I_g = Is[0]
-        I_l = Is[1]
+        I_l = Is[0]
         outgassing_liquid = p['O_l']
         dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau']) + # liters/sec*kg/liter
                     outgassing_liquid
                     ) / self.m_l
-        RHSs = [0, dI_l_dt]
+        RHSs = [dI_l_dt]
         eff_tau = self.m_l/(self.flow_l*self.LXe_density*p['eff_tau'])/3600.0
         if verbose:
             print(eff_tau)
@@ -357,13 +356,12 @@ class ELifetimeModeler(ELifetimeFitter):
         The time since zero, for time-dependent pars (does this make sense?),
         and a dictionary of free parameters.
         """
-        I_g = Is[0]
-        I_l = Is[1]
+        I_l = Is[0]
         outgassing_liquid = p['O_l']
         dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau'] ) + # liters/sec*kg/liter
                     (outgassing_liquid * np.exp(-t/p['tau_ol']))
                     ) / self.m_l
-        RHSs = [0, dI_l_dt]
+        RHSs = [dI_l_dt]
         return RHSs
 
     def liquid_only_linear_outgassing(self, Is, t, p, verbose=False):
@@ -373,8 +371,7 @@ class ELifetimeModeler(ELifetimeFitter):
         The time since zero, for time-dependent pars (does this make sense?),
         and a dictionary of free parameters.
         """
-        I_g = Is[0]
-        I_l = Is[1]
+        I_l = Is[0]
         outgassing_liquid = p['O_l']
         dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau'] ) + # liters/sec*kg/liter
                     (outgassing_liquid * 1.0/(1.0 + (t/p['tau_ol'])))
@@ -384,7 +381,7 @@ class ELifetimeModeler(ELifetimeFitter):
         eff_tau = self.m_l/(self.flow_l*self.LXe_density*p['eff_tau'])/3600.0
         if verbose:
             print(eff_tau)
-        RHSs = [0, dI_l_dt]
+        RHSs = [dI_l_dt]
         return RHSs
 
     def liquid_gas_fixed_outgassing(self, Is, t, p, verbose=False):
@@ -394,8 +391,8 @@ class ELifetimeModeler(ELifetimeFitter):
         The time since zero, for time-dependent pars (does this make sense?),
         and a dictionary of free parameters.
         """
-        I_g = Is[0]
-        I_l = Is[1]
+        I_l = Is[0]
+        I_g = Is[1]
         outgassing_liquid = p['O_l']#*np.exp(-t/p['tau_ol'])
         outgassing_gas = p['O_g']#*np.exp(-t/p['tau_og'])
         migration_lg = (1.0/p['tau_mig'])*( (p['alpha']*I_l / (1.0 + ((p['alpha'] - 1.0)*I_l))) - I_g )
@@ -411,7 +408,7 @@ class ELifetimeModeler(ELifetimeFitter):
         if verbose:
             print('Entering liquid [us^-1/sec]:')
             print((migration_gl + outgassing_liquid)/self.m_l)
-        RHSs = [dI_g_dt, dI_l_dt]
+        RHSs = [dI_l_dt, dI_g_dt]
         return RHSs
 
     def liquid_wall(self, Is, t, p, verbose=False):
@@ -429,24 +426,12 @@ class ELifetimeModeler(ELifetimeFitter):
 
 
 if __name__=='__main__':
-#    with open('elife_run1_30SLPM.dat', 'r') as f:
-#        lines = f.readlines()
-#    times = np.array([int(line.split()[0]) for line in lines])
-#    taus = np.array([float(line.split()[1]) for line in lines])
+    # Fit last 24 hours to nominal model
+    # Note: it's typically better to make another code and instantiate
+    # your own ELifetimeModeler to play around.
 
-    start_time = "180726135300"
-    stop_time = "180727110000"
-    #start_time = "180713123400"
-    #stop_time = "180713163400"
-
-    #start_time = "180710000000"
-    #stop_time = "180710180000"
-
-    t0 = datenum_to_epoch(start_time)
-    if stop_time=="now":
-        t1 = time.time()
-    else:
-        t1 = datenum_to_epoch(stop_time)
+    t1 = time.time()
+    t0 = t1 - 24.0*3600
 
     lifetime = get_data_from_mysql('daq0', 'ElectronLifetime', t0, t1)
     times = np.array([row[0]  for row in lifetime])
@@ -454,23 +439,17 @@ if __name__=='__main__':
 
     times = times - times[0]
 
-    # overwrite I_g_0 based on initial concentration from PM
-    p0['I_g_0'] = {
-        'guess': 2/taus[0],
-        'range': [0, 1e10],
-        'uncertainty': 2/taus[0],
-        }
     print(p0)
 
-#    liquid_flow_slps = 0.5*499/60. # 
     liquid_flow_lps = 0.5/60. # liters per second
 
     nb_walkers = 200
-    nb_steps = 10000
+    nb_steps = 50
     nb_dof = len(p0.keys())
-    pickle_filename = 'test.pkl'
-    fit = True 
-    new = True
+    pickle_filename = os.path.join('saved_trends', 'test.pkl')
+    fit = False
+    new = False
+    initial_values = [1.0/taus[0], p0['I_g_0']['guess']]
     if new:
         fitter = ELifetimeFitter(
             name=pickle_filename.split('.pkl')[0],
@@ -489,10 +468,10 @@ if __name__=='__main__':
             liquid_flow_lps=liquid_flow_lps,
             )
     if fit:
-        fitter.run_sampler(nb_steps, (times, taus))
+        fitter.run_sampler(nb_steps, (times, taus, initial_values))
     print(np.shape(fitter.chain))
     fitter.save_current_self(pickle_filename)
 
-    fitter.plot_best_fit(show=False)
+    fitter.plot_best_fit(times, taus, initial_values, show=False)
     fitter.plot_lnprobability(show=False)
     fitter.plot_burn_in(show=False)
