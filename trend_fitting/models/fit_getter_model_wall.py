@@ -36,31 +36,37 @@ p0 = OrderedDict(
         'guess': .58,
         'range': [0, 1e10],
         'uncertainty': 0.2,
+        'latex_name': r'$f_\tau$',
         },
     beta = {
         'guess': 0.6542,
         'range': [0.0, 1e10],
         'uncertainty': 0.5,
+        'latex_name': r'$\beta$',
         },
     tau_wl = {
         'guess': 3.1445*3600*24,
         'range': [0.0, 1e10],
         'uncertainty': 1.0*3600*24,
+        'latex_name': r'$\tau_{WL}$',
         },
     tau_lw = {
         'guess': 0.778*3600*24,
         'range': [0.0, 1e10],
         'uncertainty': 1.0*3600*24,
+        'latex_name': r'$\tau_{LW}$',
         },
     bypass_impurities = {
         'guess': 0.65/3600/24, # us-1*L/sec
         'range': [0.0, 1e10],
         'uncertainty': 1.0/3600/24,
+        'latex_name': r'$\Lambda_{bypass}$',
         },
     I_w_0 = {
         'guess': 0.0049,
         'range': [0.0, 1e10],
         'uncertainty': 0.005,
+        'latex_name': r'$n_{W0}$',
         },
     )
 
@@ -80,13 +86,12 @@ def parse_logbook_file(filename):
 start_from_dict = True
 plot_guess = False
 filter_taus = True
-
 fit = False
 plot = True
 name = 'testing_wall_model'
 model = 'liquid_wall_bypass'
 
-head_dir = '/Users/josephhowlett/research/xeclipse/'
+head_dir = '/Users/josephhowlett/research/xeclipse/analysis/tracked_analysis/'
 output_dir = os.path.join(
     head_dir,
     'trend_fitting',
@@ -101,7 +106,8 @@ if not start_from_dict:
 
 logbook_filename = os.path.join(
     head_dir,
-    'getter_tests',
+    'trend_fitting',
+    'logbook_info',
     'logbook_getter_info.dat'
     )
 run_starts, run_stops, liquid_flows = parse_logbook_file(logbook_filename)
@@ -175,7 +181,7 @@ if fit:
 if plot:
     #fitter.plot_lnprobability(show=False)
     #fitter.plot_burn_in(show=False)
-    fitter.plot_best_fit(times, taus, initial_values, show=True, get_meds=False, t0=t0, verbose=False)
+    #fitter.plot_best_fit(times, taus, initial_values, show=True, get_meds=False, t0=t0, verbose=False)
     fitter.plot_corner(show=False)
 
 

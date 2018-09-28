@@ -217,10 +217,12 @@ class ELifetimeFitter(object):
     def plot_corner(self, nb_iters=100, nb_samples=1000, filename='corner.png', show=True):
         # chain is (walkers, steps, pars)
         samples = self.chain[:,-nb_iters:,:].reshape(-1, self.chain.shape[-1])
-        names = [name for name in self.p0.keys()]
+        names = [self.p0[name].get('latex_name', name) for name in self.p0.keys()]
+        print(names)
         corner.corner(
             samples,
             labels=names,
+            label_kwargs={'fontsize': 24},
             range=[.9]*len(names),
             weights=[1.0]*len(samples),
             )
