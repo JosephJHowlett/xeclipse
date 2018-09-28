@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 
+
 import sys, os, time, calendar, signal
 import MySQLdb
 from array import array
@@ -12,10 +13,14 @@ from datetime import datetime
 import pytz
 from scipy.signal import medfilt
 
-from .par_config import par_map
-
-
-from . import credentials
+# Ugly workaround - we want to be able to run this directly
+# or import from it...
+if __name__=='__main__' and __package__ is None:
+    from par_config import par_map
+    import credentials
+else:
+    from .par_config import par_map
+    from . import credentials
 
 import argparse
 
