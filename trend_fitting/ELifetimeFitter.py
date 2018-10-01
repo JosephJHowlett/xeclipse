@@ -27,7 +27,7 @@ class ELifetimeFitter(object):
         self.LXe_density = 2.942  # kg/liter
         self.GXe_density = 5.894/1000  # kg/SL (depends on PT01)
         self.m_l = kwargs.get('m_l', 30.47)  # kg
-        self.m_g = kwargs.get('m_g', .240)  # kg
+        self.m_g = kwargs.get('m_g', .270)  # kg
         self.get_RHSs = kwargs.get('get_RHSs', self.standard_model)
 
         self.fit_initial_values = np.asarray(
@@ -202,7 +202,7 @@ class ELifetimeFitter(object):
         return
 
     ##### Plotting #####
-    def plot_corner(self, nb_iters=100, nb_samples=1000, filename='corner.png', show=True):
+    def plot_corner(self, nb_iters=500, nb_samples=1000, filename='corner.png', show=True):
         # chain is (walkers, steps, pars)
         samples = self.chain[:,-nb_iters:,:].reshape(-1, self.chain.shape[-1])
         names = [self.p0[name].get('latex_name', name) for name in self.p0.keys()]
@@ -256,10 +256,6 @@ class ELifetimeFitter(object):
         else:
             plt.plot(times/3600.0, taus, 'k.')
             plt.plot(times/3600.0, 1.0/sol[:, 0], 'r--', linewidth=2)
-            #plt.plot(times/3600.0, 1.0/taus, 'k.')
-            #plt.plot(times/3600.0, sol[:, 0], 'k--', linewidth=2)
-            #plt.text(8, 0.012, r'$\tau_{eff}\ =\ 2.7\ hours$'+'\n'+r'$\Lambda_{eff}\ =\ 0.13\ mg/day \times\ e^{-t/29\ hours} $', fontsize=20)
-            #plt.ylim([0, .03])
             plt.xlabel('Time [hours]')
         plt.ylabel('Electron Lifetime [us]')
         plt.savefig(self.name + '_' + filename)
