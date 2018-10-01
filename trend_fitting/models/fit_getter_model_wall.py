@@ -13,21 +13,21 @@ class getter_flow_model(ELifetimeModeler):
             return result[0]
         return 0.0
 
-    def liquid_wall_bypass(self, Is, t, p, verbose=False):
-        I_l = Is[0]
-        I_w = Is[1]
+    def liquid_wall_bypass(self, ns, t, p, verbose=False):
+        n_l = ns[0]
+        n_w = ns[1]
         flow_l = self.get_flow_from_time(t)
-        dI_l_dt = ( ((-flow_l * self.LXe_density * I_l * p['eff_tau'])/ self.m_l) + #liters/sec*kg/liter
-                    (I_w/(p['beta']*p['tau_wl'])) - (I_l/(p['tau_lw'])) # wall-liquid migration
+        dn_l_dt = ( ((-flow_l * self.LXe_density * n_l * p['eff_tau'])/ self.m_l) + #liters/sec*kg/liter
+                    (n_w/(p['beta']*p['tau_wl'])) - (n_l/(p['tau_lw'])) # wall-liquid migration
                     ) 
         factor = 1.0
         if not flow_l:
-            dI_l_dt += p['bypass_impurities']/(self.m_l/self.LXe_density)
-        dI_w_dt = (p['beta']*I_l/p['tau_lw']) - (I_w/p['tau_wl']) # liquid-wall migration
+            dn_l_dt += p['bypass_impurities']/(self.m_l/self.LXe_density)
+        dn_w_dt = (p['beta']*n_l/p['tau_lw']) - (n_w/p['tau_wl']) # liquid-wall migration
         if verbose:
             print('Entering liquid [us^-1/sec]:')
             print((migration_gl + outgassing_liquid)/self.m_l)
-        RHSs = [dI_l_dt, dI_w_dt]
+        RHSs = [dn_l_dt, dn_w_dt]
         return RHSs
 
 # for liquid_only_exp_outgassing model
@@ -62,7 +62,7 @@ p0 = OrderedDict(
         'uncertainty': 1.0/3600/24,
         'latex_name': r'$\Lambda_{bypass}$',
         },
-    I_w_0 = {
+    n_w_0 = {
         'guess': 0.0049,
         'range': [0.0, 1e10],
         'uncertainty': 0.005,
@@ -153,7 +153,7 @@ fitter = getter_flow_model(
             gas_flow_slps=5.0/60,
             start_from_dict=start_from_dict,
             model_name=model,
-            fit_initial_values = [None, 'I_w_0'] # tell it what initial conditions to fit
+            fit_initial_values = [None, 'n_w_0'] # tell it what initial conditions to fit
             )
 fitter.run_starts = run_starts
 fitter.run_stops = run_stops
