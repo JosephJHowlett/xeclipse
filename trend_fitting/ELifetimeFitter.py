@@ -19,11 +19,11 @@ import corner
 class ELifetimeFitter(object):
     def __init__(self, **kwargs):
         self.name = kwargs.get('name', 'ELifetimeFit')
-        self.flow_g = kwargs.get('gas_flow_slps', 10.0/60)  # SL/sec
+        self.flow_g = kwargs.get('gas_flow_slph', 10.0*60)  # SL/hour
         self.flow_l = kwargs.get(
-            'liquid_flow_lps',
-            (5.894/1000/2.942)*30.0/60
-            )  # liters/sec
+            'liquid_flow_lph',
+            (5.894/1000/2.942)*30.0*60
+            )  # liters of liquid / hour
         self.LXe_density = 2.942  # kg/liter
         self.GXe_density = 5.894/1000  # kg/SL (depends on PT01)
         self.m_l = kwargs.get('m_l', 30.47)  # kg
@@ -67,28 +67,28 @@ class ELifetimeFitter(object):
             upper_ranges[i] = self.p0[par_name]['range'][1]
         return lower_ranges, upper_ranges
 
-    def standard_model(self, Is, t, p, verbose=False):
+    def standard_model(self, ns, t, p, verbose=False):
         """The model itself.
 
         Takes in the list of impurity concentrations (1/lifetimes),
         The time since zero, for time-dependent pars (does this make sense?),
         and a dictionary of free parameters.
         """
-        I_g = Is[0]
-        I_l = Is[1]
+        n_g = ns[0]
+        n_l = ns[1]
         outgassing_liquid = p['O_l']*np.exp(-t/p['tau_ol'])
         outgassing_gas = p['O_g']*np.exp(-t/p['tau_og'])
-        migration_lg = (1.0/p['tau_mig'])*( (p['alpha']*I_l / (1.0 + ((p['alpha'] - 1.0)*I_l))) - I_g )
-        migration_gl = (1.0/p['tau_mig'])*( (p['alpha']*I_g / (p['alpha'] - ((p['alpha'] - 1.0)*I_g))) - I_l )
-        dI_g_dt = ( (-self.flow_g * self.GXe_density * I_g) + # SLPS*kg/SL*us-1
+        migration_lg = (1.0/p['tau_mig'])*( (p['alpha']*n_l / (1.0 + ((p['alpha'] - 1.0)*n_l))) - n_g )
+        migration_gl = (1.0/p['tau_mig'])*( (p['alpha']*n_g / (p['alpha'] - ((p['alpha'] - 1.0)*n_g))) - n_l )
+        dn_g_dt = ( (-self.flow_g * self.GXe_density * n_g) + # SLPH*kg/SL*us-1
                     migration_lg +
                     outgassing_gas
                     ) / self.m_g
-        dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau']) + #liters/sec*kg/liter
+        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau']) + #liters/hour*kg/liter
                     migration_gl +
                     outgassing_liquid
                     ) / self.m_l
-        RHSs = [dI_l_dt, dI_g_dt]
+        RHSs = [dn_l_dt, dn_g_dt]
         return RHSs
 
     def solve_ODEs(self, times, taus, p, initial_values, verbose=False):
@@ -245,8 +245,9 @@ class ELifetimeFitter(object):
 #        print(self.flow_l*self.LXe_density*(1.0/taus[-1])*par_meds['eff_tau']/self.m_l)
         fig = plt.figure()
         if t0:
+            # convert back to epoch
             ax = fig.add_subplot(111)
-            datetimes = dates.date2num([datetime.fromtimestamp(time+t0) for time in times])
+            datetimes = dates.date2num([datetime.fromtimestamp((3600.0*time)+t0) for time in times])
             ax.plot_date(datetimes, taus, 'k.')
             ax.plot_date(datetimes, 1.0/sol[:,0], 'r--', linewidth=2)
             date_format = dates.DateFormatter('%Y/%m/%d\n%H:%M')
@@ -254,8 +255,8 @@ class ELifetimeFitter(object):
             fig.autofmt_xdate()
             plt.xlabel('Time')
         else:
-            plt.plot(times/3600.0, taus, 'k.')
-            plt.plot(times/3600.0, 1.0/sol[:, 0], 'r--', linewidth=2)
+            plt.plot(times, taus, 'k.')
+            plt.plot(times, 1.0/sol[:, 0], 'r--', linewidth=2)
             plt.xlabel('Time [hours]')
         plt.ylabel('Electron Lifetime [us]')
         plt.savefig(self.name + '_' + filename)
@@ -327,107 +328,107 @@ class ELifetimeModeler(ELifetimeFitter):
         return
 
     # Some basic models we may want to use
-    def liquid_only_fixed_outgassing(self, Is, t, p, verbose=False):
+    def liquid_only_fixed_outgassing(self, ns, t, p, verbose=False):
         """Simplified (liquid-only, fixed outgassing) model
 
         Takes in the list of impurity concentrations (1/lifetimes),
         The time since zero, for time-dependent pars (does this make sense?),
         and a dictionary of free parameters.
         """
-        I_l = Is[0]
+        n_l = ns[0]
         outgassing_liquid = p['O_l']
-        dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau']) + # liters/sec*kg/liter
+        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau']) + # liters/hour*kg/liter
                     outgassing_liquid
                     ) / self.m_l
-        RHSs = [dI_l_dt]
-        eff_tau = self.m_l/(self.flow_l*self.LXe_density*p['eff_tau'])/3600.0
+        RHSs = [dn_l_dt]
+        eff_tau = self.m_l/(self.flow_l*self.LXe_density*p['eff_tau'])
         if verbose:
             print(eff_tau)
         return RHSs
 
-    def liquid_only_exp_outgassing(self, Is, t, p, verbose=False):
+    def liquid_only_exp_outgassing(self, ns, t, p, verbose=False):
         """Simplified (liquid-only, exponentially-decreasing outgassing) model
 
         Takes in the list of impurity concentrations (1/lifetimes),
         The time since zero, for time-dependent pars (does this make sense?),
         and a dictionary of free parameters.
         """
-        I_l = Is[0]
+        n_l = ns[0]
         outgassing_liquid = p['O_l']
-        dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau'] ) + # liters/sec*kg/liter
+        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau'] ) + # liters/hour*kg/liter
                     (outgassing_liquid * np.exp(-t/p['tau_ol']))
                     ) / self.m_l
-        RHSs = [dI_l_dt]
+        RHSs = [dn_l_dt]
         return RHSs
 
-    def liquid_only_linear_outgassing(self, Is, t, p, verbose=False):
+    def liquid_only_linear_outgassing(self, ns, t, p, verbose=False):
         """Simplified (liquid-only, linearly-decreasing outgassing) model
 
         Takes in the list of impurity concentrations (1/lifetimes),
         The time since zero, for time-dependent pars (does this make sense?),
         and a dictionary of free parameters.
         """
-        I_l = Is[0]
+        n_l = ns[0]
         outgassing_liquid = p['O_l']
-        dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau'] ) + # liters/sec*kg/liter
+        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau'] ) + # liters/hour*kg/liter
                     (outgassing_liquid * 1.0/(1.0 + (t/p['tau_ol'])))
                     ) / self.m_l
         if verbose:
             print((outgassing_liquid * 1.0/(1.0 + (t/p['tau_ol'])))/self.m_l)
-        eff_tau = self.m_l/(self.flow_l*self.LXe_density*p['eff_tau'])/3600.0
+        eff_tau = self.m_l/(self.flow_l*self.LXe_density*p['eff_tau'])
         if verbose:
             print(eff_tau)
-        RHSs = [dI_l_dt]
+        RHSs = [dn_l_dt]
         return RHSs
 
-    def liquid_gas_fixed_outgassing(self, Is, t, p, verbose=False):
+    def liquid_gas_fixed_outgassing(self, ns, t, p, verbose=False):
         """Simplified (liquid and gas vol, fixed outgassing) model
 
         Takes in the list of impurity concentrations (1/lifetimes),
         The time since zero, for time-dependent pars (does this make sense?),
         and a dictionary of free parameters.
         """
-        I_l = Is[0]
-        I_g = Is[1]
+        n_l = ns[0]
+        n_g = ns[1]
         outgassing_liquid = p['O_l']#*np.exp(-t/p['tau_ol'])
         outgassing_gas = p['O_g']#*np.exp(-t/p['tau_og'])
-        migration_lg = (1.0/p['tau_mig'])*( (p['alpha']*I_l / (1.0 + ((p['alpha'] - 1.0)*I_l))) - I_g )
-        migration_gl = (1.0/p['tau_mig'])*( (p['alpha']*I_g / (p['alpha'] - ((p['alpha'] - 1.0)*I_g))) - I_l )
-        dI_g_dt = ( (-self.flow_g * self.GXe_density * I_g) + # SLPS*kg/SL*us-1
+        migration_lg = (1.0/p['tau_mig'])*( (p['alpha']*n_l / (1.0 + ((p['alpha'] - 1.0)*n_l))) - n_g )
+        migration_gl = (1.0/p['tau_mig'])*( (p['alpha']*n_g / (p['alpha'] - ((p['alpha'] - 1.0)*n_g))) - n_l )
+        dn_g_dt = ( (-self.flow_g * self.GXe_density * n_g) + # SLPS*kg/SL*us-1
                     migration_lg +
                     outgassing_gas
                     ) / self.m_g
-        dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau']) + #liters/sec*kg/liter
+        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau']) + #liters/hour*kg/liter
                     migration_gl +
                     outgassing_liquid
                     ) / self.m_l
         if verbose:
-            print('Entering liquid [us^-1/sec]:')
+            print('Entering liquid [us^-1/hour]:')
             print((migration_gl + outgassing_liquid)/self.m_l)
-        RHSs = [dI_l_dt, dI_g_dt]
+        RHSs = [dn_l_dt, dn_g_dt]
         return RHSs
 
-    def liquid_wall(self, Is, t, p, verbose=False):
-        I_l = Is[0]
-        I_w = Is[1]
-        dI_l_dt = ( (-self.flow_l * self.LXe_density * I_l * p['eff_tau']) + #liters/sec*kg/liter
-                    (I_w/(p['beta']*p['tau_wl'])) - (I_l/(p['tau_lw'])) # wall-liquid migration
+    def liquid_wall(self, ns, t, p, verbose=False):
+        n_l = ns[0]
+        n_w = ns[1]
+        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau']) + #liters/hour*kg/liter
+                    (n_w/(p['beta']*p['tau_wl'])) - (n_l/(p['tau_lw'])) # wall-liquid migration
                     ) / self.m_l
-        dI_w_dt = (p['beta']*I_l/p['tau_lw']) - (I_w/p['tau_wl']) # liquid-wall migration
+        dn_w_dt = (p['beta']*n_l/p['tau_lw']) - (n_w/p['tau_wl']) # liquid-wall migration
         if verbose:
-            print('Entering liquid [us^-1/sec]:')
+            print('Entering liquid [us^-1/hour]:')
             print((migration_gl + outgassing_liquid)/self.m_l)
-        RHSs = [dI_l_dt, dI_w_dt]
+        RHSs = [dn_l_dt, dn_w_dt]
         return RHSs
 
 
 if __name__=='__main__':
     # Fit last 24 hours to nominal model
-    # Note: it's typically better to make another code and instantiate
+    # Note: it's typically better to make another program and instantiate
     # your own ELifetimeModeler to play around.
 
     t1 = time.time()
-    t0 = t1 - 24.0*3600
+    t0 = t1 - 24.0
 
     lifetime = get_data_from_mysql('daq0', 'ElectronLifetime', t0, t1)
     times = np.array([row[0]  for row in lifetime])
@@ -437,7 +438,7 @@ if __name__=='__main__':
 
     print(p0)
 
-    liquid_flow_lps = 0.5/60. # liters per second
+    liquid_flow_lph = 0.5*60 # liters per hour
 
     nb_walkers = 200
     nb_steps = 50
@@ -445,14 +446,14 @@ if __name__=='__main__':
     pickle_filename = os.path.join('saved_trends', 'test.pkl')
     fit = False
     new = False
-    initial_values = [1.0/taus[0], p0['I_g_0']['guess']]
+    initial_values = [1.0/taus[0], p0['n_g_0']['guess']]
     if new:
         fitter = ELifetimeFitter(
             name=pickle_filename.split('.pkl')[0],
             nb_walkers=nb_walkers,
             p0=p0,
             function_to_explore='chi2',
-            liquid_flow_lps=liquid_flow_lps,
+            liquid_flow_lph=liquid_flow_lph,
             )
     else:
         fitter = ELifetimeFitter(
@@ -461,7 +462,7 @@ if __name__=='__main__':
             function_to_explore='chi2',
             start_from_dict=pickle_filename,
             p0=p0,
-            liquid_flow_lps=liquid_flow_lps,
+            liquid_flow_lph=liquid_flow_lph,
             )
     if fit:
         fitter.run_sampler(nb_steps, (times, taus, initial_values))
