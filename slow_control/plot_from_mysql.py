@@ -55,7 +55,7 @@ def get_data_from_mysql(table, column_name, t0=1410802453, t1=int(time.time())):
     database_user = credentials.database_user
     database_pass = credentials.database_pass
 
-    pid = os.spawnlp(os.P_NOWAIT, 'ssh', 'ssh', '-L', '3307:localhost:3306', '-N', 'xedaq@xeclipse.astro.columbia.edu', '-p', '7920')
+    pid = os.spawnlp(os.P_NOWAIT, 'ssh', 'ssh', '-L', '3307:localhost:3306', '-N', credentials.server_address, '-p', '7920')
     time.sleep(1)
 
     # open the connection to the database
