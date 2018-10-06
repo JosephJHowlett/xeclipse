@@ -29,6 +29,9 @@ class ELifetimeFitter(object):
         self.m_l = kwargs.get('m_l', 30.47)  # kg
         self.m_g = kwargs.get('m_g', .270)  # kg
         self.get_RHSs = kwargs.get('get_RHSs', self.standard_model)
+        self.times = kwargs.get('times', None)
+        self.taus = kwargs.get('taus', None)
+        self.initial_values = kwargs.get('initial_values', None)
 
         self.fit_initial_values = np.asarray(
             kwargs.get('fit_initial_values', [None]*10))
@@ -135,7 +138,14 @@ class ELifetimeFitter(object):
             chi2 = self.get_chi2(taus, 1.0/sol[:, 0])
             return -chi2
 
-    def run_sampler(self, nb_steps, fixed_args):
+    def run_sampler(self, nb_steps, fixed_args=None):
+        if (fixed_args==None):
+            fixed_args = (self.times, self.taus, self.initial_values)
+        if not np.all(fixed_args):
+            raise ValueError(
+                'You need to give the sampler (times, taus, initial_values)\
+                or give these as args when you instantiate the class.'
+            )
         sampler = emcee.EnsembleSampler(
             self.nb_walkers,
             self.nb_dof,
