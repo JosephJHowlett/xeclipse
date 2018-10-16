@@ -270,7 +270,7 @@ class ELifetimeFitter(object):
             samples,
             labels=names,
             label_kwargs={'fontsize': 24},
-            range=[.9]*len(names),
+            range=[.99]*len(names),
             weights=[1.0]*len(samples),
             )
         plt.savefig(self.name + '_' + filename)
@@ -305,20 +305,25 @@ class ELifetimeFitter(object):
         par_mode = self.p_vector_to_dict(self.chain[ind[0], ind[1], :])[par_name]
         par_vals = par_sets[:, self.get_par_i(par_name)]
         par_vals = par_vals[np.where(par_vals<np.percentile(par_vals, 99.))[0]]
-        plt.figure()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
         plt.hist(par_vals, histtype='step', bins=50, color='k', weights=[1.0/len(par_vals)]*len(par_vals))
         for par_quantile in par_quantiles:
             plt.axvline(x=par_quantile, linestyle='--', color='k')
-        plt.axvline(x=par_mode, linestyle='-', color='k', label='Mode: %.2f' % par_mode)
-        plt.text(2000, 0.1, self.p0[par_name]['latex_name']+' = $%.2f^{+%.2f}_{-%.2f}$' % (
-            par_quantiles[1],
-            par_quantiles[2]-par_quantiles[1],
-            par_quantiles[1]-par_quantiles[0]
-        ), fontsize=24)
+        plt.axvline(x=par_mode, linestyle='-', color='k', label='Global Mode: %.2f' % par_mode)
+        plt.text(0.1, 0.5, self.p0[par_name]['latex_name']+' = $%.2f^{+%.2f}_{-%.2f}$' % (
+                par_quantiles[1],
+                par_quantiles[2]-par_quantiles[1],
+                par_quantiles[1]-par_quantiles[0]
+            ),
+            fontsize=24,
+            verticalalignment='bottom', horizontalalignment='left',
+            transform=ax.transAxes,
+        )
         plt.xlabel('Parameter Value')
         plt.ylabel('Frequency')
         plt.legend()
-        plt.savefig('alpha_dist.png')
+        plt.savefig(self.name + '_' + filename)
         plt.show()
 
     def plot_best_fit(self, times, taus, initial_values, nb_iters=50, filename='best_fit.png', show=True, get_meds=True, t0=False, verbose=False, odes_latex=[], text_pos='top'):
@@ -375,27 +380,26 @@ class ELifetimeFitter(object):
 
         # print ODEs (model) if given
         if len(odes_latex):
-            ode_string = r''
-            for ode in odes_latex:
-                ode_string += ode + '\n'
             if text_pos=='top':
-                plt.text(
-                    0.05,
-                    0.95,
-                    ode_string,
-                    verticalalignment='top', horizontalalignment='left',
-                    transform=ax.transAxes,
-                    fontsize=20, color='blue', fontweight='bold'
-                )
+                for i, ode_string in enumerate(odes_latex):
+                    plt.text(
+                        0.01,
+                        0.95 - (0.15*i),
+                        ode_string,
+                        verticalalignment='top', horizontalalignment='left',
+                        transform=ax.transAxes,
+                        fontsize=20, color='blue'
+                    )
             else:
-                plt.text(
-                    0.05,
-                    0.01,
-                    ode_string,
-                    verticalalignment='bottom', horizontalalignment='left',
-                    transform=ax.transAxes,
-                    fontsize=20, color='blue', fontweight='bold'
-                )
+                for i, ode_string in enumerate(odes_latex):
+                    plt.text(
+                        0.05,
+                        0.01 + (0.15*i),
+                        ode_string,
+                        verticalalignment='bottom', horizontalalignment='left',
+                        transform=ax.transAxes,
+                        fontsize=20, color='blue', fontweight='bold'
+                    )
 
         # print parameter values
         par_string = r''
@@ -591,7 +595,7 @@ class MultipleModeler(ELifetimeModeler):
             'initial_values',
             'fit_initial_values',
             'model_name',
-        ]
+        ]:
             attr_value = getattr(self, range_specific_attr)
             if len(attr_value) != self.nb_time_ranges:
                 print('Copying %s for multiple ranges' % range_specific_attr)
