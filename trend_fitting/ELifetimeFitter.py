@@ -19,27 +19,26 @@ import CoolProp.CoolProp as CP
 
 class ELifetimeFitter(object):
     def __init__(self, **kwargs):
-        self.name = kwargs.get('name', 'ELifetimeFit')
         self.flow_g = kwargs.get('gas_flow_slph', 10.0*60)  # SL/hour
         self.flow_l = kwargs.get(
             'liquid_flow_lph',
             (5.894/1000/2.942)*30.0*60
             )  # liters of liquid / hour
-        #self.LXe_density = 2.942  # kg/liter
-        #self.GXe_density = 5.894/1000  # kg/SL (depends on PT01)
+        self.odeint_kwargs = kwargs.get('odeint_kwargs', {})
+        self.times = kwargs.get('times', None)
+        self.taus = kwargs.get('taus', None)
+        self.initial_values = kwargs.get('initial_values', None)
+        self.fit_initial_values = np.asarray(
+            kwargs.get('fit_initial_values', [None]*10))
+
+
+        self.name = kwargs.get('name', 'ELifetimeFit')
         self.M_tot = kwargs.get('M_tot', 34.0)  # kg
         self.V_PM = kwargs.get('V_PM', 26.8)  # liters
         self.setup_thermodynamics()
 
         self.get_RHSs = kwargs.get('get_RHSs', self.standard_model)
-        self.times = kwargs.get('times', None)
-        self.taus = kwargs.get('taus', None)
-        self.initial_values = kwargs.get('initial_values', None)
 
-        self.fit_initial_values = np.asarray(
-            kwargs.get('fit_initial_values', [None]*10))
-
-        self.odeint_kwargs = kwargs.get('odeint_kwargs', {})
 
         self.name_to_function_map = {
             'chi2': self.chi2_from_pars,
@@ -571,6 +570,57 @@ class ELifetimeModeler(ELifetimeFitter):
             print((migration_gl + outgassing_liquid)/self.m_l)
         RHSs = [dn_l_dt, dn_w_dt]
         return RHSs
+
+class MultipleModeler(ELifetimeModeler):
+    """Under Construction..."""
+    def __init__(self, **kwargs):
+        super(MultipleModeler, self).__init__(**kwargs)
+        # check if simultaneously fitting multiple ranges
+        self.nb_time_ranges = kwargs.get('nb_time_ranges', 1)
+        if self.nb_time_ranges < 2:
+            raise ValueError(
+                'Please specify nb_time_ranges > 2 or use a different class'
+            )
+        # make sure above things have the appropriate dimension
+        for range_specific_attr in [
+            'flow_g',
+            'flow_l',
+            'odeint_kwargs',
+            'times',
+            'taus',
+            'initial_values',
+            'fit_initial_values',
+            'model_name',
+        ]
+            attr_value = getattr(self, range_specific_attr)
+            if len(attr_value) != self.nb_time_ranges:
+                print('Copying %s for multiple ranges' % range_specific_attr)
+                setattr(
+                    self,
+                    range_specific_attr,
+                    [attr_value]*self.nb_time_ranges
+                )
+        return
+
+    def lnl_from_pars(self, p, times, taus, initial_values):
+        """The log-likelihood function for MCMC
+
+        Takes in a list of parameter values, which needs to match
+        the ordering of pars elsewhere.
+        """
+        total_lnl = 0.0
+        if not self.check_pars(p):
+            return -np.inf
+        p = self.p_vector_to_dict(p)
+        if np.any(np.asarray(p.values())<0):
+            return -np.inf
+        else:
+            sol, message = self.solve_ODEs(times, taus, p, initial_values)
+            if 'Excess work' in message:
+                return -np.inf
+            # calculate chi2 based on lifetime observed
+            return self.get_lnl(taus, 1.0/sol[:, 0], 0.15*taus)
+
 
 
 if __name__=='__main__':
