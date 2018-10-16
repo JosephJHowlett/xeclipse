@@ -14,6 +14,7 @@ from operator import itemgetter
 from pars import p0
 
 import corner
+import CoolProp.CoolProp as CP
 
 
 class ELifetimeFitter(object):
@@ -24,10 +25,12 @@ class ELifetimeFitter(object):
             'liquid_flow_lph',
             (5.894/1000/2.942)*30.0*60
             )  # liters of liquid / hour
-        self.LXe_density = 2.942  # kg/liter
-        self.GXe_density = 5.894/1000  # kg/SL (depends on PT01)
-        self.m_l = kwargs.get('m_l', 30.47)  # kg
-        self.m_g = kwargs.get('m_g', .270)  # kg
+        #self.LXe_density = 2.942  # kg/liter
+        #self.GXe_density = 5.894/1000  # kg/SL (depends on PT01)
+        self.M_tot = kwargs.get('M_tot', 34.0)  # kg
+        self.V_PM = kwargs.get('V_PM', 26.8)  # liters
+        self.setup_thermodynamics()
+
         self.get_RHSs = kwargs.get('get_RHSs', self.standard_model)
         self.times = kwargs.get('times', None)
         self.taus = kwargs.get('taus', None)
@@ -39,7 +42,8 @@ class ELifetimeFitter(object):
         self.odeint_kwargs = kwargs.get('odeint_kwargs', {})
 
         self.name_to_function_map = {
-            'chi2': self.chi2_from_pars
+            'chi2': self.chi2_from_pars,
+            'lnl': self.lnl_from_pars,
             }
 
         # either start from a pickled dictionary
@@ -48,7 +52,7 @@ class ELifetimeFitter(object):
             self.p0 = kwargs['p0']
             self.lower_ranges, self.upper_ranges = self.setup_ranges()
             self.start_from_dict()
-        # or start from a bunch of kwargs
+        # or start in a gaussian ball around p0
         else:
             self.nb_steps = 0
             self.nb_walkers = kwargs.get('nb_walkers', 80)
@@ -56,10 +60,24 @@ class ELifetimeFitter(object):
             self.lower_ranges, self.upper_ranges = self.setup_ranges()
             self.nb_dof = len(self.p0)
             self.setup_pos0_from_p0()
-        if kwargs.get('function_to_explore', False):
-            self.function_to_explore = kwargs['function_to_explore']
-        else:
-            raise ValueError('Give me a function to use!')
+
+        # default to simple chi2
+        self.function_to_explore = kwargs.get('function_to_explore', 'chi2')
+        return
+
+    def setup_thermodynamics(self, **kwargs):
+        detector_pressure = 1.700  # bar
+        standard_temperature = 273.15  # K
+        standard_pressure = 101325  # Pa
+        xenon_standard_density = 1e-3*CP.PropsSI('D', 'P', standard_pressure, 'T', standard_temperature, 'Xenon')  # kg/L
+        self.LXe_density = 1e-3*CP.PropsSI('D', 'P', 1.e5*detector_pressure, 'Q', 0, 'Xenon')  # kg/L
+        self.GXe_density = 1e-3*CP.PropsSI('D', 'P', 1.e5*detector_pressure, 'Q', 1, 'Xenon')  # kg/L
+        self.V_gas = (((self.LXe_density * self.V_PM) - self.M_tot)
+            / (self.LXe_density - self.GXe_density)
+        )
+        self.V_liquid = self.V_PM - self.V_gas
+        print('liquid mass: %.2f kg ' % (self.LXe_density*self.V_liquid))
+        print('gas mass: %.2f kg ' % (self.GXe_density*self.V_gas))
         return
 
     def setup_ranges(self):
@@ -103,17 +121,31 @@ class ELifetimeFitter(object):
         return sol, verb['message']
 
     def get_chi2(self, observation, expectation):
-        chi2 = np.sum((observation - expectation)**2.0/(expectation**2.0))
+        chi2 = np.sum((observation - expectation)**2.0/(2*expectation**2.0))
         if np.isnan(chi2):
             print('ch2 is nan!')
             chi2=np.inf
         return chi2
+
+    def get_lnl(self, observation, expectation, uncertainty):
+        chi2 = np.sum((observation - expectation)**2.0/(2*uncertainty**2.0))
+        if np.isnan(chi2):
+            print('ch2 is nan!')
+            chi2=np.inf
+        normalization = np.sum(np.log(1.0/np.sqrt(2*np.pi)/uncertainty))
+        return normalization - chi2
 
     def p_vector_to_dict(self, p_vector):
         p_dict = OrderedDict()
         for i, par_name in enumerate(self.p0.keys()):
             p_dict[par_name] = p_vector[i]
         return p_dict
+
+    def get_par_i(self, par_name):
+        for i, name in enumerate(self.p0.keys()):
+            if par_name==name:
+                return i
+        return None
 
     def check_pars(self, p):
         return np.all(np.greater(p, self.lower_ranges)) and np.all(np.less(p, self.upper_ranges))
@@ -138,14 +170,33 @@ class ELifetimeFitter(object):
             chi2 = self.get_chi2(taus, 1.0/sol[:, 0])
             return -chi2
 
+    def lnl_from_pars(self, p, times, taus, initial_values):
+        """The log-likelihood function for MCMC
+
+        Takes in a list of parameter values, which needs to match
+        the ordering of pars elsewhere.
+        """
+        if not self.check_pars(p):
+            return -np.inf
+        p = self.p_vector_to_dict(p)
+        if np.any(np.asarray(p.values())<0):
+            return -np.inf
+        else:
+            sol, message = self.solve_ODEs(times, taus, p, initial_values)
+            if 'Excess work' in message:
+                return -np.inf
+            # calculate chi2 based on lifetime observed
+            return self.get_lnl(taus, 1.0/sol[:, 0], 0.15*taus)
+
     def run_sampler(self, nb_steps, fixed_args=None):
         if (fixed_args==None):
             fixed_args = (self.times, self.taus, self.initial_values)
-        if not np.all(fixed_args):
-            raise ValueError(
-                'You need to give the sampler (times, taus, initial_values)\
-                or give these as args when you instantiate the class.'
-            )
+        for fixed_arg in fixed_args:
+            if not hasattr(fixed_arg, '__len__'):
+                raise ValueError(
+                    'You need to give the sampler (times, taus, initial_values)\
+                    or give these as args when you instantiate the class.'
+                )
         sampler = emcee.EnsembleSampler(
             self.nb_walkers,
             self.nb_dof,
@@ -229,7 +280,49 @@ class ELifetimeFitter(object):
         plt.close('all')
         return
 
-    def plot_best_fit(self, times, taus, initial_values, nb_iters=50, filename='best_fit.png', show=True, get_meds=True, t0=False, verbose=False):
+    def plot_marginalized_posterior(self, par_name, nb_iters=200, filename='marginal_posterior.png', show=True):
+        ind = np.unravel_index(np.argmax(self.lnprobability, axis=None), self.lnprobability.shape)
+        par_sets = []
+        tot_iters = np.shape(self.chain)[1]
+        # chain is (walkers, steps, pars)
+        for walker in range(np.shape(self.chain)[0]):
+            for step in range(nb_iters):
+                if not np.isinf(self.lnprobability[walker][tot_iters-nb_iters+step]):
+                    par_sets.append(self.chain[walker][tot_iters-nb_iters+step])
+        par_sets = np.asarray(par_sets)
+        par_meds = self.p_vector_to_dict(np.percentile(
+            par_sets,
+            50.0,
+            axis=0))
+        par_ups = self.p_vector_to_dict(np.percentile(
+            par_sets,
+            84.0,
+            axis=0))
+        par_lows = self.p_vector_to_dict(np.percentile(
+            par_sets,
+            16.0,
+            axis=0))
+        par_quantiles = (par_lows[par_name], par_meds[par_name], par_ups[par_name])
+        par_mode = self.p_vector_to_dict(self.chain[ind[0], ind[1], :])[par_name]
+        par_vals = par_sets[:, self.get_par_i(par_name)]
+        par_vals = par_vals[np.where(par_vals<np.percentile(par_vals, 99.))[0]]
+        plt.figure()
+        plt.hist(par_vals, histtype='step', bins=50, color='k', weights=[1.0/len(par_vals)]*len(par_vals))
+        for par_quantile in par_quantiles:
+            plt.axvline(x=par_quantile, linestyle='--', color='k')
+        plt.axvline(x=par_mode, linestyle='-', color='k', label='Mode: %.2f' % par_mode)
+        plt.text(2000, 0.1, self.p0[par_name]['latex_name']+' = $%.2f^{+%.2f}_{-%.2f}$' % (
+            par_quantiles[1],
+            par_quantiles[2]-par_quantiles[1],
+            par_quantiles[1]-par_quantiles[0]
+        ), fontsize=24)
+        plt.xlabel('Parameter Value')
+        plt.ylabel('Frequency')
+        plt.legend()
+        plt.savefig('alpha_dist.png')
+        plt.show()
+
+    def plot_best_fit(self, times, taus, initial_values, nb_iters=50, filename='best_fit.png', show=True, get_meds=True, t0=False, verbose=False, odes_latex=[], text_pos='top'):
         ind = np.unravel_index(np.argmax(self.lnprobability, axis=None), self.lnprobability.shape)
         par_sets = []
         tot_iters = np.shape(self.chain)[1]
@@ -244,16 +337,27 @@ class ELifetimeFitter(object):
                 par_sets,
                 50.0,
                 axis=0))
+            par_ups = self.p_vector_to_dict(np.percentile(
+                par_sets,
+                84.0,
+                axis=0))
+            par_lows = self.p_vector_to_dict(np.percentile(
+                par_sets,
+                16.0,
+                axis=0))
         else:
             # use mode
             par_meds = self.p_vector_to_dict(self.chain[ind[0], ind[1], :])
+            par_ups = par_meds
+            par_lows = par_meds
         for key, val in par_meds.items():
-            print('%s: %.2e' % (key, val))
+            print('%s: %.2e + %.2e - %.2e' % (key, val, par_ups[key]-val, val-par_lows[key]))
         sol, _ = self.solve_ODEs(times, taus, par_meds, initial_values, verbose=verbose)
+        print('Log-Likelihood:')
         print(self.chi2_from_pars(par_meds.values(), times, taus, initial_values))
 #        print(self.m_l/par_meds['eff_tau']/self.flow_l/self.LXe_density)
 #        print(self.flow_l*self.LXe_density*(1.0/taus[-1])*par_meds['eff_tau']/self.m_l)
-        fig = plt.figure()
+        fig = plt.figure(figsize=(10, 6))
         if t0:
             # convert back to epoch
             ax = fig.add_subplot(111)
@@ -265,9 +369,46 @@ class ELifetimeFitter(object):
             fig.autofmt_xdate()
             plt.xlabel('Time')
         else:
+            ax = fig.add_subplot(111)
             plt.plot(times, taus, 'k.')
             plt.plot(times, 1.0/sol[:, 0], 'r--', linewidth=2)
             plt.xlabel('Time [hours]')
+
+        # print ODEs (model) if given
+        if len(odes_latex):
+            ode_string = r''
+            for ode in odes_latex:
+                ode_string += ode + '\n'
+            if text_pos=='top':
+                plt.text(
+                    0.05,
+                    0.95,
+                    ode_string,
+                    verticalalignment='top', horizontalalignment='left',
+                    transform=ax.transAxes,
+                    fontsize=20, color='blue', fontweight='bold'
+                )
+            else:
+                plt.text(
+                    0.05,
+                    0.01,
+                    ode_string,
+                    verticalalignment='bottom', horizontalalignment='left',
+                    transform=ax.transAxes,
+                    fontsize=20, color='blue', fontweight='bold'
+                )
+
+        # print parameter values
+        par_string = r''
+        for key, val in par_meds.items():
+            par_string += self.p0[key].get('latex_name', '$%s$' % key)
+            par_string += '$\ =\ $'
+            par_string += '$%.2e\ %s$\n' % (val, self.p0[key].get('unit', ''))
+        plt.text(0.5, 0.95, par_string,
+            verticalalignment='top', horizontalalignment='left',
+            transform=ax.transAxes, fontsize=20, color='blue',
+        )
+
         plt.ylabel('Electron Lifetime [us]')
         plt.savefig(self.name + '_' + filename)
         if show:
