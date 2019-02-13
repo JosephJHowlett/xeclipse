@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.integrate import odeint
+from scipy.optimize import curve_fit, minimize
+import scipy.stats
 import matplotlib.pyplot as plt
 import emcee
 from collections import OrderedDict
@@ -19,11 +21,16 @@ import CoolProp.CoolProp as CP
 
 class ELifetimeFitter(object):
     def __init__(self, **kwargs):
-        self.flow_g = kwargs.get('gas_flow_slph', 10.0*60)  # SL/hour
-        self.flow_l = kwargs.get(
-            'liquid_flow_lph',
-            (5.894/1000/2.942)*30.0*60
-            )  # liters of liquid / hour
+        slpm_per_llpm = 2942/5.894
+        self.flow_gg = kwargs.get('gas_getter_flow_slph', 10.0*60)  # SL/hour
+        self.flow_lg = kwargs.get(
+            'liquid_getter_flow_slpm',
+            30.0
+            )/slpm_per_llpm*60  # liters of liquid / hour
+        self.flow_cl = kwargs.get(
+            'cryogenic_liquid_flow_lpm',
+            0.5
+            )*60  # liters of liquid / hour
         self.odeint_kwargs = kwargs.get('odeint_kwargs', {})
         self.times = kwargs.get('times', None)
         self.taus = kwargs.get('taus', None)
@@ -100,11 +107,11 @@ class ELifetimeFitter(object):
         outgassing_gas = p['O_g']*np.exp(-t/p['tau_og'])
         migration_lg = (1.0/p['tau_mig'])*( (p['alpha']*n_l / (1.0 + ((p['alpha'] - 1.0)*n_l))) - n_g )
         migration_gl = (1.0/p['tau_mig'])*( (p['alpha']*n_g / (p['alpha'] - ((p['alpha'] - 1.0)*n_g))) - n_l )
-        dn_g_dt = ( (-self.flow_g * self.GXe_density * n_g) + # SLPH*kg/SL*us-1
+        dn_g_dt = ( (-self.flow_gg * self.GXe_density * n_g) + # SLPH*kg/SL*us-1
                     migration_lg +
                     outgassing_gas
                     ) / self.m_g
-        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau']) + #liters/hour*kg/liter
+        dn_l_dt = ( (-self.flow_lg * self.LXe_density * n_l * p['eff_tau']) + #liters/hour*kg/liter
                     migration_gl +
                     outgassing_liquid
                     ) / self.m_l
@@ -131,7 +138,11 @@ class ELifetimeFitter(object):
         if np.isnan(chi2):
             print('ch2 is nan!')
             chi2=np.inf
-        normalization = np.sum(np.log(1.0/np.sqrt(2*np.pi)/uncertainty))
+        normalization = np.sum(-1*np.log(np.sqrt(2*np.pi)) - np.log(uncertainty))
+        if np.isnan(normalization):
+            print('norm is nan!')
+            normalization = -np.inf
+        lnl = normalization - chi2
         return normalization - chi2
 
     def p_vector_to_dict(self, p_vector):
@@ -185,7 +196,43 @@ class ELifetimeFitter(object):
             if 'Excess work' in message:
                 return -np.inf
             # calculate chi2 based on lifetime observed
-            return self.get_lnl(taus, 1.0/sol[:, 0], 0.15*taus)
+            lnl = self.get_lnl(taus, 1.0/sol[:, 0], (0.15*taus)+10.0)
+        if np.isnan(lnl):
+            return -np.inf
+        lnl += self.priors_from_pars(p)
+        return lnl
+
+    def priors_from_pars(self, p):
+        logprior = 0.0
+        for key, val in p.items():
+            if self.p0[key].get('prior', None):
+                distribution = getattr(scipy.stats, self.p0[key]['prior']['type'])
+                logprior += distribution.logpdf(val, **self.p0[key]['prior']['args'])
+        return logprior
+
+    def reset_walkers(self, perc=99., nb_iters=500):
+        """Update last position of all walkers outside a given percentile"""
+        # get all means
+        tot_iters = np.shape(self.chain)[1]
+        par_sets = []
+        for walker in range(np.shape(self.chain)[0]):
+            for step in range(nb_iters):
+                if not np.isinf(self.lnprobability[walker][tot_iters-nb_iters+step]):
+                    par_sets.append(self.chain[walker][tot_iters-nb_iters+step])
+        par_sets = np.asarray(par_sets)
+        par_val_cutoffs_high = np.percentile(par_sets, perc, axis=0)
+        par_val_cutoffs_low = np.percentile(par_sets, 100 - perc, axis=0)
+        # loop over walkers
+        for walker in range(np.shape(self.chain)[0]):
+            par_vals = self.chain[walker][-1]
+            inds_above = np.where(par_vals > par_val_cutoffs_high)[0]
+            for ind in inds_above:
+                self.chain[walker][-1][ind] = par_val_cutoffs_high[ind]
+            inds_below = np.where(par_vals < par_val_cutoffs_low)[0]
+            for ind in inds_below:
+                self.chain[walker][-1][ind] = par_val_cutoffs_low[ind]
+        self.pos0 = self.chain[:,-1,:]
+        print('Reset walkers outside [%f, %f] percentile.' % (perc, 1-perc))
 
     def run_sampler(self, nb_steps, fixed_args=None):
         if (fixed_args==None):
@@ -262,15 +309,17 @@ class ELifetimeFitter(object):
         return
 
     ##### Plotting #####
-    def plot_corner(self, nb_iters=500, nb_samples=1000, filename='corner.png', show=True):
+    def plot_corner(self, nb_iters=500, nb_samples=1000, filename='corner.png', show=True, range=None):
         # chain is (walkers, steps, pars)
         samples = self.chain[:,-nb_iters:,:].reshape(-1, self.chain.shape[-1])
         names = [self.p0[name].get('latex_name', name) for name in self.p0.keys()]
+        if range:
+            range=[range]*len(names)
         corner.corner(
             samples,
             labels=names,
             label_kwargs={'fontsize': 24},
-            range=[.99]*len(names),
+            range=range,
             weights=[1.0]*len(samples),
             )
         plt.savefig(self.name + '_' + filename)
@@ -304,10 +353,16 @@ class ELifetimeFitter(object):
         par_quantiles = (par_lows[par_name], par_meds[par_name], par_ups[par_name])
         par_mode = self.p_vector_to_dict(self.chain[ind[0], ind[1], :])[par_name]
         par_vals = par_sets[:, self.get_par_i(par_name)]
-        par_vals = par_vals[np.where(par_vals<np.percentile(par_vals, 99.))[0]]
+        #par_vals = par_vals[np.where(par_vals<np.percentile(par_vals, 999.))[0]]
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        plt.hist(par_vals, histtype='step', bins=50, color='k', weights=[1.0/len(par_vals)]*len(par_vals))
+        n, bins, _ = plt.hist(par_vals, histtype='step', bins=50, color='k')#, weights=[1.0/len(par_vals)]*len(par_vals))
+        centers = (bins - 0.5*(bins[1]-bins[0]))[1:]
+        def gaus(x, const, mean, sigma):
+            return const/np.sqrt(2*np.pi)/sigma*np.exp(-(x-mean)**2.0/(2.0*sigma**2.0))
+        popt, popcov = curve_fit(gaus, centers, n, p0=[np.max(n), np.mean(n), np.std(n)])
+        print(popt)
+        plt.plot(centers, gaus(centers, *popt), 'r--')
         for par_quantile in par_quantiles:
             plt.axvline(x=par_quantile, linestyle='--', color='k')
         plt.axvline(x=par_mode, linestyle='-', color='k', label='Global Mode: %.2f' % par_mode)
@@ -491,7 +546,7 @@ class ELifetimeModeler(ELifetimeFitter):
         """
         n_l = ns[0]
         outgassing_liquid = p['O_l']
-        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau']) + # liters/hour*kg/liter
+        dn_l_dt = ( (-self.flow_lg * self.LXe_density * n_l * p['eff_tau']) + # liters/hour*kg/liter
                     outgassing_liquid
                     ) / self.m_l
         RHSs = [dn_l_dt]
@@ -509,7 +564,7 @@ class ELifetimeModeler(ELifetimeFitter):
         """
         n_l = ns[0]
         outgassing_liquid = p['O_l']
-        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau'] ) + # liters/hour*kg/liter
+        dn_l_dt = ( (-self.flow_lg * self.LXe_density * n_l * p['eff_tau'] ) + # liters/hour*kg/liter
                     (outgassing_liquid * np.exp(-t/p['tau_ol']))
                     ) / self.m_l
         RHSs = [dn_l_dt]
@@ -524,12 +579,12 @@ class ELifetimeModeler(ELifetimeFitter):
         """
         n_l = ns[0]
         outgassing_liquid = p['O_l']
-        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau'] ) + # liters/hour*kg/liter
+        dn_l_dt = ( (-self.flow_lg * self.LXe_density * n_l * p['eff_tau'] ) + # liters/hour*kg/liter
                     (outgassing_liquid * 1.0/(1.0 + (t/p['tau_ol'])))
                     ) / self.m_l
         if verbose:
             print((outgassing_liquid * 1.0/(1.0 + (t/p['tau_ol'])))/self.m_l)
-        eff_tau = self.m_l/(self.flow_l*self.LXe_density*p['eff_tau'])
+        eff_tau = self.m_l/(self.flow_lg*self.LXe_density*p['eff_tau'])
         if verbose:
             print(eff_tau)
         RHSs = [dn_l_dt]
@@ -548,11 +603,11 @@ class ELifetimeModeler(ELifetimeFitter):
         outgassing_gas = p['O_g']#*np.exp(-t/p['tau_og'])
         migration_lg = (1.0/p['tau_mig'])*( (p['alpha']*n_l / (1.0 + ((p['alpha'] - 1.0)*n_l))) - n_g )
         migration_gl = (1.0/p['tau_mig'])*( (p['alpha']*n_g / (p['alpha'] - ((p['alpha'] - 1.0)*n_g))) - n_l )
-        dn_g_dt = ( (-self.flow_g * self.GXe_density * n_g) + # SLPS*kg/SL*us-1
+        dn_g_dt = ( (-self.flow_gg * self.GXe_density * n_g) + # SLPS*kg/SL*us-1
                     migration_lg +
                     outgassing_gas
                     ) / self.m_g
-        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau']) + #liters/hour*kg/liter
+        dn_l_dt = ( (-self.flow_lg * self.LXe_density * n_l * p['eff_tau']) + #liters/hour*kg/liter
                     migration_gl +
                     outgassing_liquid
                     ) / self.m_l
@@ -565,7 +620,7 @@ class ELifetimeModeler(ELifetimeFitter):
     def liquid_wall(self, ns, t, p, verbose=False):
         n_l = ns[0]
         n_w = ns[1]
-        dn_l_dt = ( (-self.flow_l * self.LXe_density * n_l * p['eff_tau']) + #liters/hour*kg/liter
+        dn_l_dt = ( (-self.flow_lg * self.LXe_density * n_l * p['eff_tau']) + #liters/hour*kg/liter
                     (n_w/(p['beta']*p['tau_wl'])) - (n_l/(p['tau_lw'])) # wall-liquid migration
                     ) / self.m_l
         dn_w_dt = (p['beta']*n_l/p['tau_lw']) - (n_w/p['tau_wl']) # liquid-wall migration
@@ -628,8 +683,9 @@ class MultipleModeler(ELifetimeModeler):
 
 
 if __name__=='__main__':
+    # Example:
     # Fit last 24 hours to nominal model
-    # Note: it's typically better to make another program and instantiate
+    # Note: it's better to make another program and instantiate
     # your own ELifetimeModeler to play around.
 
     t1 = time.time()
