@@ -44,21 +44,21 @@ class ELifetimeFitter(object):
         self.V_PM = kwargs.get('V_PM', 26.8)  # liters
         self.setup_thermodynamics()
 
-        self.get_RHSs = kwargs.get('get_RHSs', self.standard_model)
-
+        # set the differential equation function
+        self.get_RHSs = self.standard_model
 
         self.name_to_function_map = {
             'chi2': self.chi2_from_pars,
             'lnl': self.lnl_from_pars,
             }
 
-        # either start from a pickled dictionary
+        # either start from the last step from a pickled dictionary
         if kwargs.get('start_from_dict', False):
             self.sampler_dict = self.load_self_dict(kwargs['start_from_dict'])
             self.p0 = kwargs['p0']
             self.lower_ranges, self.upper_ranges = self.setup_ranges()
             self.start_from_dict()
-        # or start in a gaussian ball around p0
+        # or start in a gaussian ball around kwarg p0
         else:
             self.nb_steps = 0
             self.nb_walkers = kwargs.get('nb_walkers', 80)
@@ -67,8 +67,8 @@ class ELifetimeFitter(object):
             self.nb_dof = len(self.p0)
             self.setup_pos0_from_p0()
 
-        # default to simple chi2
-        self.function_to_explore = kwargs.get('function_to_explore', 'chi2')
+        # default to lnl
+        self.function_to_explore = kwargs.get('function_to_explore', 'lnl')
 
         # setup plotmaker
         self.plotter = MCMCPlotMaker.MCMCPlotMaker(self)
@@ -321,14 +321,16 @@ class ELifetimeModeler(ELifetimeFitter):
     to numerically integrate via a model for their derivatives.
 
     Just write a function or choose one below, and when you initialize
-    the class instance, feed a kwarg called `model_name` - a string of
+    the class instance, feed a kwarg called `model_function_name` - a string of
     the function's name.
 
     """
 
     def __init__(self, **kwargs):
+        # initialize as the super-class first
         super(ELifetimeModeler, self).__init__(**kwargs)
-        self.get_RHSs = getattr(self, kwargs.get('model_name', 'standard_model'))
+        # overwrite the model with custom model
+        self.get_RHSs = getattr(self, kwargs.get('model_function_name', 'standard_model'))
         return
 
     # Some basic models we may want to use
@@ -428,6 +430,7 @@ class ELifetimeModeler(ELifetimeFitter):
 class MultipleModeler(ELifetimeModeler):
     """Under Construction..."""
     def __init__(self, **kwargs):
+        # initialize as the super-class first
         super(MultipleModeler, self).__init__(**kwargs)
         # check if simultaneously fitting multiple ranges
         self.nb_time_ranges = kwargs.get('nb_time_ranges', 1)
@@ -444,7 +447,7 @@ class MultipleModeler(ELifetimeModeler):
             'taus',
             'initial_values',
             'fit_initial_values',
-            'model_name',
+            'model_function_name',
         ]:
             attr_value = getattr(self, range_specific_attr)
             if len(attr_value) != self.nb_time_ranges:
@@ -474,4 +477,3 @@ class MultipleModeler(ELifetimeModeler):
                 return -np.inf
             # calculate chi2 based on lifetime observed
             return self.get_lnl(taus, 1.0/sol[:, 0], 0.15*taus)
-
