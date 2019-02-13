@@ -13,8 +13,6 @@ from slow_control.plot_from_mysql import *
 import pdb
 from operator import itemgetter
 
-from pars import p0
-
 import corner
 import CoolProp.CoolProp as CP
 
