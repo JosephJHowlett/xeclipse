@@ -40,7 +40,10 @@ class ELifetimeFitter(object):
 
 
         self.name = kwargs.get('name', 'ELifetimeFit')
-        self.M_tot = kwargs.get('M_tot', 34.0)  # kg
+        self.detector_pressure = kwargs.get('detector_pressure', 1.7)  # bar
+        self.M_tot = kwargs.get('M_tot', 41.19)  # kg
+        self.M_PM = kwargs.get('M_PM', 35.24)  # kg
+        self.M_CPS = M_tot - M_PM
         self.V_PM = kwargs.get('V_PM', 26.8)  # liters
         self.setup_thermodynamics()
 
@@ -52,18 +55,18 @@ class ELifetimeFitter(object):
             'lnl': self.lnl_from_pars,
             }
 
+        self.p0 = kwargs['p0']
+        self.lower_ranges, self.upper_ranges = self.setup_ranges()
         # either start from the last step from a pickled dictionary
+        # Note: this only affects the parameter stuff - walker positions,
+        # chain history, shape, etc.
         if kwargs.get('start_from_dict', False):
             self.sampler_dict = self.load_self_dict(kwargs['start_from_dict'])
-            self.p0 = kwargs['p0']
-            self.lower_ranges, self.upper_ranges = self.setup_ranges()
             self.start_from_dict()
         # or start in a gaussian ball around kwarg p0
         else:
             self.nb_steps = 0
             self.nb_walkers = kwargs.get('nb_walkers', 80)
-            self.p0 = kwargs['p0']
-            self.lower_ranges, self.upper_ranges = self.setup_ranges()
             self.nb_dof = len(self.p0)
             self.setup_pos0_from_p0()
 
@@ -75,18 +78,18 @@ class ELifetimeFitter(object):
         return
 
     def setup_thermodynamics(self, **kwargs):
-        detector_pressure = 1.700  # bar
+        detector_pressure = self.detector_pressure  # bar
         standard_temperature = 273.15  # K
         standard_pressure = 101325  # Pa
-        xenon_standard_density = 1e-3*CP.PropsSI('D', 'P', standard_pressure, 'T', standard_temperature, 'Xenon')  # kg/L
-        self.LXe_density = 1e-3*CP.PropsSI('D', 'P', 1.e5*detector_pressure, 'Q', 0, 'Xenon')  # kg/L
-        self.GXe_density = 1e-3*CP.PropsSI('D', 'P', 1.e5*detector_pressure, 'Q', 1, 'Xenon')  # kg/L
-        self.V_gas = (((self.LXe_density * self.V_PM) - self.M_tot)
+        self.Xe_standard_density = 1e-3*CP.PropsSI('D', 'P', standard_pressure, 'T', standard_temperature, 'Xenon')  # kg/L
+        self.LXe_density = 1e-3*CP.PropsSI('D', 'P', 1e5*detector_pressure, 'Q', 0, 'Xenon')  # kg/L
+        self.GXe_density = 1e-3*CP.PropsSI('D', 'P', 1e5*detector_pressure, 'Q', 1, 'Xenon')  # kg/L
+        self.V_PM_gas = (((self.LXe_density * self.V_PM) - self.M_PM)
             / (self.LXe_density - self.GXe_density)
         )
-        self.V_liquid = self.V_PM - self.V_gas
-        print('liquid mass: %.2f kg ' % (self.LXe_density*self.V_liquid))
-        print('gas mass: %.2f kg ' % (self.GXe_density*self.V_gas))
+        self.V_PM_liquid = self.V_PM - self.V_PM_gas
+        print('liquid mass: %.2f kg ' % (self.LXe_density*self.V_PM_liquid))
+        print('gas mass: %.2f kg ' % (self.GXe_density*self.V_PM_gas))
         return
 
     def setup_ranges(self):
@@ -96,6 +99,10 @@ class ELifetimeFitter(object):
             lower_ranges[i] = self.p0[par_name]['range'][0]
             upper_ranges[i] = self.p0[par_name]['range'][1]
         return lower_ranges, upper_ranges
+
+    def lifetime_uncertainty(self, taus):
+        # TODO: UPDATE WITH ACTUAL FUNCTION
+        return (0.15*taus) + 10.0
 
     def standard_model(self, ns, t, p, verbose=False):
         """The model itself.
@@ -121,7 +128,7 @@ class ELifetimeFitter(object):
         RHSs = [dn_l_dt, dn_g_dt]
         return RHSs
 
-    def solve_ODEs(self, times, taus, p, initial_values, verbose=False):
+    def solve_ODEs(self, times, p, initial_values, verbose=False):
         # set fit values to their pars
         if np.any(self.fit_initial_values):
             inds_to_fit = np.where(self.fit_initial_values)[0]
@@ -175,7 +182,7 @@ class ELifetimeFitter(object):
         if np.any(np.asarray(p.values())<0):
             return -np.inf
         else:
-            sol, message = self.solve_ODEs(times, taus, p, initial_values)
+            sol, message = self.solve_ODEs(times, p, initial_values)
             if 'Excess work' in message:
                 return -np.inf
             # calculate chi2 based on liquid impurities observed
@@ -192,20 +199,18 @@ class ELifetimeFitter(object):
         if not self.check_pars(p):
             return -np.inf
         p = self.p_vector_to_dict(p)
-        if np.any(np.asarray(p.values())<0):
+        sol, message = self.solve_ODEs(times, p, initial_values)
+        if 'Excess work' in message:
             return -np.inf
-        else:
-            sol, message = self.solve_ODEs(times, taus, p, initial_values)
-            if 'Excess work' in message:
-                return -np.inf
-            # calculate chi2 based on lifetime observed
-            lnl = self.get_lnl(taus, 1.0/sol[:, 0], (0.15*taus)+10.0)
+        # calculate chi2 based on lifetime observed
+        lnl = self.get_lnl(taus, 1.0/sol[:, 0], self.lifetime_uncertainty(taus))
         if np.isnan(lnl):
             return -np.inf
         lnl += self.priors_from_pars(p)
         return lnl
 
     def priors_from_pars(self, p):
+        # stolen from bbf
         logprior = 0.0
         for key, val in p.items():
             if self.p0[key].get('prior', None):
@@ -214,7 +219,7 @@ class ELifetimeFitter(object):
         return logprior
 
     def reset_walkers(self, perc=99., nb_iters=500):
-        """Update last position of all walkers outside a given percentile"""
+        """Update last position of all walkers outside a given percentile."""
         # get all means
         tot_iters = np.shape(self.chain)[1]
         par_sets = []
@@ -261,6 +266,7 @@ class ELifetimeFitter(object):
         self.update_self_from_sampler(sampler)
         return
 
+    # I/O Stuff
     def update_self_from_sampler(self, sampler):
         self.pos0 = sampler.chain[:,-1,:]
         if self.nb_steps:
@@ -300,6 +306,8 @@ class ELifetimeFitter(object):
 
     def setup_pos0_from_p0(self):
         # setup pos0
+        # start walkers in a gaussian ball around p0
+        # with std's given by "uncertainty"
         self.pos0 = []
         for i in range(self.nb_walkers):
             walker_start = []
@@ -309,6 +317,22 @@ class ELifetimeFitter(object):
                     scale=self.p0[par]['uncertainty'],
                     ))
             self.pos0.append(walker_start)
+        # now we need to correct those we started outside
+        # the bounds we defined for the pars
+        # if restart_at_edge, places these walkers at the edges
+        # of the allowed range, else at the mean
+        pos0_arr = np.asarray(self.pos0)
+        restart_at_edge = False
+        for walker in range(self.nb_walkers):
+            inds_above = np.where(pos0_arr[walker] > self.upper_ranges)[0]
+            inds_below = np.where(pos0_arr[walker] < self.lower_ranges)[0]
+            if restart_at_edge:
+                pos0_arr[walker][inds_above] = self.upper_ranges[inds_above]
+                pos0_arr[walker][inds_below] = self.lower_ranges[inds_below]
+            else:
+                pos0_arr[walker][inds_above] = np.array([self.p0[self.p0.keys()[ind]]['guess'] for ind in inds_above])
+                pos0_arr[walker][inds_below] = np.array([self.p0[self.p0.keys()[ind]]['guess'] for ind in inds_below])
+        self.pos0 = pos0_arr.tolist()
         return
 
 
@@ -440,8 +464,9 @@ class MultipleModeler(ELifetimeModeler):
             )
         # make sure above things have the appropriate dimension
         for range_specific_attr in [
-            'flow_g',
-            'flow_l',
+            'flow_gg',
+            'flow_lg',
+            'flow_cl',
             'odeint_kwargs',
             'times',
             'taus',
@@ -460,20 +485,26 @@ class MultipleModeler(ELifetimeModeler):
         return
 
     def lnl_from_pars(self, p, times, taus, initial_values):
-        """The log-likelihood function for MCMC
-
-        Takes in a list of parameter values, which needs to match
-        the ordering of pars elsewhere.
-        """
         total_lnl = 0.0
         if not self.check_pars(p):
             return -np.inf
         p = self.p_vector_to_dict(p)
-        if np.any(np.asarray(p.values())<0):
-            return -np.inf
-        else:
-            sol, message = self.solve_ODEs(times, taus, p, initial_values)
+        for (
+            time_set,
+            tau_set,
+            initial_value_set
+        ) in zip(
+            times,
+            taus,
+            initial_values
+        ):
+            sol, message = self.solve_ODEs(time_set, p, initial_value_set)
             if 'Excess work' in message:
                 return -np.inf
             # calculate chi2 based on lifetime observed
-            return self.get_lnl(taus, 1.0/sol[:, 0], 0.15*taus)
+            lnl = self.get_lnl(taus, 1.0/sol[:, 0], self.lifetime_uncertainty(taus))
+            if np.isnan(lnl):
+                return -np.inf
+            total_lnl += lnl
+        total_lnl += self.priors_from_pars(p)
+        return total_lnl
