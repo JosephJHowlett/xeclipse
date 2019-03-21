@@ -149,6 +149,7 @@ def parse_sys_args(argv):
     parser = argparse.ArgumentParser(description="Reduction of XENON1T data")
 
     parser.add_argument('--par_name', dest='par_name', required=True,
+                        default='ElectronLifetime',
                         action='store', type=str,
                         help='Parameter to grab from MySQL')
 
@@ -175,6 +176,10 @@ def parse_sys_args(argv):
     parser.add_argument('--second_ymin', dest='second_ymin', default=None,
                         action='store', type=float,
                         help='ymin for par plot')
+
+    parser.add_argument('--second_ymax', dest='second_ymax', default=None,
+                        action='store', type=float,
+                        help='ymax for par plot')
 
     parser.add_argument('--no_plot', dest='no_plot',
                         action='store_true',
@@ -205,6 +210,9 @@ if __name__ == '__main__':
     ylim = None
     if (args.ymin is not None) and (args.ymax is not None):
         ylim=[args.ymin, args.ymax]
+    second_ylim = None
+    if (args.second_ymin is not None) and (args.second_ymax is not None):
+        second_ylim=[args.second_ymin, args.second_ymax]
     t0 = datenum_to_epoch(args.start_timestr.replace("_", ""))
     if args.stop_timestr=='now':
         t1 = int(time.time())
@@ -221,6 +229,6 @@ if __name__ == '__main__':
         if args.par_name_2:
             ax = plot_directly(data, args.par_name, save_name=False, show=False, color='r', medfilter=args.filter_kernel, ylim=ylim)
             data_2 = get_data_from_mysql(par_map[args.par_name_2]['table'], args.par_name_2, t0, t1)
-            plot_directly(data_2, args.par_name_2, newfig=False, twin=True, ax=ax, color='b', save_name=args.plot_filename, medfilter=args.filter_kernel)
+            plot_directly(data_2, args.par_name_2, newfig=False, twin=True, ax=ax, color='b', save_name=args.plot_filename, medfilter=args.filter_kernel, ylim=second_ylim)
         else:
             ax = plot_directly(data, args.par_name, save_name=args.plot_filename, show=True, medfilter=args.filter_kernel, ylim=ylim)
