@@ -21,16 +21,17 @@ import MCMCPlotMaker
 
 class ELifetimeFitter(object):
     def __init__(self, **kwargs):
-        slpm_per_llpm = 2942/5.894
-        self.flow_gg = kwargs.get('gas_getter_flow_slph', 10.0*60)  # SL/hour
+        #slpm_per_llpm = 2942/5.894
+        self.flow_gg = kwargs.get('gas_getter_flow_slph', 10.0*60)  # SLPH
         self.flow_lg = kwargs.get(
             'liquid_getter_flow_slpm',
             30.0
-            )/slpm_per_llpm*60  # liters of liquid / hour
-        self.flow_cl = kwargs.get(
-            'cryogenic_liquid_flow_lpm',
-            0.5
-            )*60  # liters of liquid / hour
+            )*60  # SLPH
+#        self.flow_cl = kwargs.get(
+#            'cryogenic_liquid_flow_lpm',
+#            0.5
+#            )*60  # liters of liquid / hour
+        self.flow_cl = kwargs.get('DPT31', 0.0)*1.54*60 # ll/H
         self.odeint_kwargs = kwargs.get('odeint_kwargs', {})
         self.times = kwargs.get('times', None)
         self.taus = kwargs.get('taus', None)
@@ -43,9 +44,10 @@ class ELifetimeFitter(object):
         self.detector_pressure = kwargs.get('detector_pressure', 1.7)  # bar
         self.M_tot = kwargs.get('M_tot', 41.19)  # kg
         self.M_PM = kwargs.get('M_PM', 35.24)  # kg
-        self.M_CPS = M_tot - M_PM
+        self.M_CPS = self.M_tot - self.M_PM
         self.V_PM = kwargs.get('V_PM', 26.8)  # liters
         self.setup_thermodynamics()
+        self.setup_taus()
 
         # set the differential equation function
         self.get_RHSs = self.standard_model
@@ -77,7 +79,7 @@ class ELifetimeFitter(object):
         self.plotter = MCMCPlotMaker.MCMCPlotMaker(self)
         return
 
-    def setup_thermodynamics(self, **kwargs):
+    def setup_thermodynamics(self):
         detector_pressure = self.detector_pressure  # bar
         standard_temperature = 273.15  # K
         standard_pressure = 101325  # Pa
@@ -88,8 +90,20 @@ class ELifetimeFitter(object):
             / (self.LXe_density - self.GXe_density)
         )
         self.V_PM_liquid = self.V_PM - self.V_PM_gas
-        print('liquid mass: %.2f kg ' % (self.LXe_density*self.V_PM_liquid))
-        print('gas mass: %.2f kg ' % (self.GXe_density*self.V_PM_gas))
+        self.V_CPS_liquid = self.M_CPS / self.LXe_density  # placeholder while no CPS gas model
+        print('PM liquid mass: %.2f kg ' % (self.LXe_density*self.V_PM_liquid))
+        print('PM gas mass: %.2f kg ' % (self.GXe_density*self.V_PM_gas))
+        print('CPS liquid mass: %.2f kg ' % (self.LXe_density*self.V_CPS_liquid))
+        return
+
+    def setup_taus(self):
+        self.tau_l = self.V_PM_liquid * self.LXe_density / self.flow_lg / self.Xe_standard_density # hrs
+        self.tau_cl = self.V_PM_liquid / self.flow_cl
+        self.tau_clpb = self.tau_cl * self.V_CPS_liquid / self.V_PM_liquid
+        if self.flow_gg:
+            self.tau_g = self.V_PM_gas * self.GXe_density / self.flow_gg / self.Xe_standard_density  # hrs
+        else:
+            self.tau_g = 0
         return
 
     def setup_ranges(self):
@@ -240,7 +254,7 @@ class ELifetimeFitter(object):
             for ind in inds_below:
                 self.chain[walker][-1][ind] = par_val_cutoffs_low[ind]
         self.pos0 = self.chain[:,-1,:]
-        print('Reset walkers outside [%f, %f] percentile.' % (perc, 1-perc))
+        print('Reset walkers outside [%f, %f] percentile.' % (100-perc, perc))
 
     def run_sampler(self, nb_steps, fixed_args=None):
         if (fixed_args==None):
