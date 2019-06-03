@@ -35,8 +35,8 @@ par_map = {
         'table': 'adc0',
         'unit': 'bar',
         },
-    'FT01_MFlowGasCirc': {
-        'table': 'adc0',
+    'FT02_MFlowGasCirc': {
+        'table': 'adc1',
         'unit': 'SLPM',
         },
     'TE01a_TColdFingerA': {
@@ -69,6 +69,10 @@ par_map = {
         },
     'TE33_TO2Filter': {
         'table': 'adc1',
+        'unit': 'deg C',
+        },
+    'TE34_TParticleFilterOutlet': {
+        'table': 'lakeshore0',
         'unit': 'deg C',
         },
     'TE91_TArOutlet': {
@@ -129,6 +133,14 @@ par_map = {
         },
     'TE32_TPumpOutlet': {
         'table': 'lakeshore0',
+        'unit': 'C',
+        },
+    'PT81_PInjectorReservoir': {
+        'table': 'adc2',
+        'unit': 'Bar',
+        },
+    'TServerRoom': {
+        'table': 'adc0',
         'unit': 'C',
         },
     }
