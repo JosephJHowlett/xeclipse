@@ -13,7 +13,7 @@ import corner
 
 class MCMCPlotMaker(object):
 
-    """Auxialliary object to make plots based on an ELifetimeFitter's chain
+    """Auxiliary class to make plots based on an ELifetimeFitter's chain
 
     This object holds the ELifetimeFitter as an attribute, and vice versa.
     To make plots from an instance of ELifetimeFitter (e.g. "fitter = ELifetimeFitter()"),
@@ -34,7 +34,7 @@ class MCMCPlotMaker(object):
             samples,
             labels=names,
             label_kwargs={'fontsize': 24},
-            range=range,
+#            range=range,
             weights=[1.0]*len(samples),
             )
         plt.savefig(self.fitter.name + '_' + filename)
@@ -96,7 +96,7 @@ class MCMCPlotMaker(object):
         plt.savefig(self.fitter.name + '_' + filename)
         plt.show()
 
-    def plot_best_fit(self, times, taus, initial_values, nb_iters=50, filename='best_fit.png', show=True, get_meds=True, t0=False, verbose=False, odes_latex=[], text_pos='top'):
+    def plot_best_fit(self, times, taus, initial_values, nb_iters=50, filename='best_fit.png', show=True, get_meds=True, t0=False, verbose=False, odes_latex=[], text_pos='top', **kwargs):
         ind = np.unravel_index(np.argmax(self.fitter.lnprobability, axis=None), self.fitter.lnprobability.shape)
         par_sets = []
         tot_iters = np.shape(self.fitter.chain)[1]
@@ -126,7 +126,9 @@ class MCMCPlotMaker(object):
             par_lows = par_meds
         for key, val in par_meds.items():
             print('%s: %.2e + %.2e - %.2e' % (key, val, par_ups[key]-val, val-par_lows[key]))
-        sol, _ = self.fitter.solve_ODEs(times, taus, par_meds, initial_values, verbose=verbose)
+        solve_times = times
+        solve_times = np.linspace(times[0], times[-1] + kwargs.get('extrapolate_time_hrs', 0.0), len(times))
+        sol, _ = self.fitter.solve_ODEs(solve_times, par_meds, initial_values, verbose=verbose)
         print('Log-Likelihood:')
         print(self.fitter.chi2_from_pars(par_meds.values(), times, taus, initial_values))
 #        print(self.fitter.m_l/par_meds['eff_tau']/self.fitter.flow_l/self.fitter.LXe_density)
@@ -136,8 +138,9 @@ class MCMCPlotMaker(object):
             # convert back to epoch
             ax = fig.add_subplot(111)
             datetimes = dates.date2num([datetime.fromtimestamp((3600.0*time)+t0) for time in times])
+            plot_datetimes = dates.date2num([datetime.fromtimestamp((3600.0*time)+t0) for time in solve_times])
             ax.plot_date(datetimes, taus, 'k.')
-            ax.plot_date(datetimes, 1.0/sol[:,0], 'r--', linewidth=2)
+            ax.plot_date(plot_datetimes, 1.0/sol[:,0], 'r--', linewidth=2)
             date_format = dates.DateFormatter('%Y/%m/%d\n%H:%M')
             ax.xaxis.set_major_formatter(date_format)
             fig.autofmt_xdate()
@@ -145,7 +148,7 @@ class MCMCPlotMaker(object):
         else:
             ax = fig.add_subplot(111)
             plt.plot(times, taus, 'k.')
-            plt.plot(times, 1.0/sol[:, 0], 'r--', linewidth=2)
+            plt.plot(solve_times, 1.0/sol[:, 0], 'r--', linewidth=2)
             plt.xlabel('Time [hours]')
 
         # print ODEs (model) if given
