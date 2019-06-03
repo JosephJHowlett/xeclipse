@@ -1,8 +1,8 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy.integrate import odeint
 from scipy.optimize import curve_fit, minimize
 import scipy.stats
-import matplotlib.pyplot as plt
 import emcee
 from collections import OrderedDict
 from click import progressbar
@@ -144,6 +144,7 @@ class ELifetimeFitter(object):
 
     def solve_ODEs(self, times, p, initial_values, verbose=False):
         # set fit values to their pars
+        initial_values = np.asarray(initial_values)
         if np.any(self.fit_initial_values):
             inds_to_fit = np.where(self.fit_initial_values)[0]
             initial_values[inds_to_fit] = itemgetter(*self.fit_initial_values[inds_to_fit])(p)
@@ -193,16 +194,14 @@ class ELifetimeFitter(object):
         if not self.check_pars(p):
             return -np.inf
         p = self.p_vector_to_dict(p)
-        if np.any(np.asarray(p.values())<0):
+
+        sol, message = self.solve_ODEs(times, p, initial_values)
+        if 'Excess work' in message:
             return -np.inf
-        else:
-            sol, message = self.solve_ODEs(times, p, initial_values)
-            if 'Excess work' in message:
-                return -np.inf
-            # calculate chi2 based on liquid impurities observed
+        # calculate chi2 based on liquid impurities observed
 #            chi2 = self.get_chi2(1.0/taus, sol[:, 0])
-            chi2 = self.get_chi2(taus, 1.0/sol[:, 0])
-            return -chi2
+        chi2 = self.get_chi2(taus, 1.0/sol[:, 0])
+        return -chi2
 
     def lnl_from_pars(self, p, times, taus, initial_values):
         """The log-likelihood function for MCMC
@@ -344,8 +343,8 @@ class ELifetimeFitter(object):
                 pos0_arr[walker][inds_above] = self.upper_ranges[inds_above]
                 pos0_arr[walker][inds_below] = self.lower_ranges[inds_below]
             else:
-                pos0_arr[walker][inds_above] = np.array([self.p0[self.p0.keys()[ind]]['guess'] for ind in inds_above])
-                pos0_arr[walker][inds_below] = np.array([self.p0[self.p0.keys()[ind]]['guess'] for ind in inds_below])
+                pos0_arr[walker][inds_above] = np.array([self.p0[list(self.p0.keys())[ind]]['guess'] for ind in inds_above])
+                pos0_arr[walker][inds_below] = np.array([self.p0[list(self.p0.keys())[ind]]['guess'] for ind in inds_below])
         self.pos0 = pos0_arr.tolist()
         return
 

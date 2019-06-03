@@ -181,7 +181,7 @@ stop_time = "181020_000000"
 omit_start = "181018_170000"
 omit_stop = "181018_170000"
 #omit_stop = "181019_000000"
-name = 'prompt_injection_v02_open_continuous_injection_181018'
+name = 'prompt_injection_v02_open_continuous_injection_181018_python3'
 model_function_name = 'pm_model_prompt_injection'
 
 
@@ -297,7 +297,7 @@ if plot:
         times,
         taus,
         initial_values,
-        show=True,
+        show=False,
         get_meds=False,
         t0=t0,
         verbose=False,

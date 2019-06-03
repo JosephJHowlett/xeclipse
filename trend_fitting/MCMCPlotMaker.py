@@ -9,6 +9,8 @@ import sys
 
 from slow_control.plot_from_mysql import *
 
+import pdb
+
 import corner
 
 class MCMCPlotMaker(object):
@@ -130,7 +132,7 @@ class MCMCPlotMaker(object):
         solve_times = np.linspace(times[0], times[-1] + kwargs.get('extrapolate_time_hrs', 0.0), len(times))
         sol, _ = self.fitter.solve_ODEs(solve_times, par_meds, initial_values, verbose=verbose)
         print('Log-Likelihood:')
-        print(self.fitter.chi2_from_pars(par_meds.values(), times, taus, initial_values))
+#        print(self.fitter.chi2_from_pars(list(par_meds.values()), times, taus, initial_values))
 #        print(self.fitter.m_l/par_meds['eff_tau']/self.fitter.flow_l/self.fitter.LXe_density)
 #        print(self.fitter.flow_l*self.fitter.LXe_density*(1.0/taus[-1])*par_meds['eff_tau']/self.fitter.m_l)
         fig = plt.figure(figsize=(10, 6))
@@ -189,6 +191,7 @@ class MCMCPlotMaker(object):
         plt.savefig(self.fitter.name + '_' + filename)
         if show:
             plt.show()
+        sys.exit()
         plt.close('all')
         return
 

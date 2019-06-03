@@ -3,6 +3,7 @@ from __future__ import absolute_import
 
 import sys, os, time, calendar, signal
 import MySQLdb
+import mysql.connector
 from array import array
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,12 +16,14 @@ from scipy.signal import medfilt
 
 # Ugly workaround - we want to be able to run this directly
 # or import from it...
-if __name__=='__main__' and __package__ is None:
-    from par_config import par_map
-    import credentials
-else:
-    from .par_config import par_map
-    from . import credentials
+#if __name__=='__main__' and __package__ is None:
+#    from par_config import par_map
+#    import credentials
+#else:
+#    from .par_config import par_map
+#    from . import credentials
+from par_config import par_map
+import credentials
 
 import argparse
 
@@ -65,10 +68,18 @@ def get_data_from_mysql(table, column_name, t0=1410802453, t1=int(time.time())):
 
     # open the connection to the database
     try:
-        connection = MySQLdb.connect('127.0.0.1', database_user, database_pass, 'smac', port=3307)
+        #connection = MySQLdb.connect('127.0.0.1', database_user, database_pass, 'smac', port=3307)
+        connection = mysql.connector.connect(
+                            user=database_user,
+                            password=database_pass,
+                            host='127.0.0.1',
+                            database='smac',
+                            port=3307
+                            )
         cursor = connection.cursor()
-    except MySQLdb.Error, e:
-        print 'problem connection to run database, error %d: %s' % (e.args[0], e.args[1])
+    except MySQLdb.Error as e:
+        print(e)
+        print('problem connection to run database, error %d: %s' % (e.args[0], e.args[1]))
         sys.exit(1)
 
     column_list = table + '_id' + ',' + column_name
