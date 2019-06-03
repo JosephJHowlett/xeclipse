@@ -22,13 +22,13 @@ class getter_bypass_modeler(ELifetimeModeler):
         if t<t_change:
             flow_g = 0.0
         dn_g_dt = (
-                    (-flow_g * self.GXe_density * n_g * p['eff_tau_g']) / self.m_g + # slph*kg/sl*us-1
+                    (-flow_g * n_g * p['eff_tau_g']) / self.V_gas + # slph*kg/sl*us-1
                     migration_lg +
-                    outgassing_gas / (self.m_l/self.LXe_density)
+                    outgassing_gas / self.V_gas
                     )
-        dn_l_dt = ( (-flow_l * self.LXe_density * n_l * p['eff_tau']) / self.m_l + #liters/hour*kg/liter
+        dn_l_dt = ( (-flow_l * n_l * p['eff_tau']) / self.V_liquid + #liters/hour*kg/liter
                     migration_gl +
-                    outgassing_liquid / (self.m_l/self.LXe_density)
+                    outgassing_liquid / self.V_liquid
                     ) 
         RHSs = [dn_l_dt, dn_g_dt]
         return RHSs
@@ -37,25 +37,25 @@ class getter_bypass_modeler(ELifetimeModeler):
 # for liquid_only_exp_outgassing model
 p0 = OrderedDict(
     O_l = {
-        'guess': 0.02/24, # Impurities/sec
+        'guess': 0.075/24, # Impurities/sec
         'range': [0, 1e10],
         'uncertainty': 0.2/24,
         'latex_name': r'$\Lambda_L$',
         },
     O_g = {
-        'guess': 2.148/24, # Impurities/sec
+        'guess': 6.148/24, # Impurities/sec
         'range': [0, 1e10],
         'uncertainty': 2.148/24,
         'latex_name': r'$\Lambda_G$',
         },
     tau_og = {
-        'guess': 1.45*24,
+        'guess': 1.05*24,
         'range': [-1e10, 1e10],
         'uncertainty': 5.0*24,
         'latex_name': r'$t_{1/2,\Lambda_G}$',
         },
     eff_tau = {
-        'guess': 0.6907,
+        'guess': 0.5907,
         'range': [0, 1e10],
         'uncertainty': 0.69,
         'latex_name': r'$f$',
@@ -67,9 +67,16 @@ p0 = OrderedDict(
         'latex_name': r'$f_G$',
         },
     alpha = {
-        'guess': 15.0,
+        'guess': 159.0,
         'range': [0, 1e10],
-        'uncertainty': 40.0,
+        'uncertainty': 100.0,
+        'prior': {
+            'type': 'norm',
+            'args': dict(
+                loc=159,
+                scale=27.8
+            ),
+        },
         'latex_name': r'$\alpha$',
         },
     tau_lg = {
@@ -99,12 +106,12 @@ name = 'temperature_shift_180505_model'
 model = 'temperature_shift_model'
 
 
-start_from_dict = False
+start_from_dict = True
 plot_guess = False
 filter_taus = False
 
-fit = True
-plot = True 
+fit = False
+plot = True
 
 head_dir = '/Users/josephhowlett/research/xeclipse/analysis/tracked_analysis/'
 output_dir = os.path.join(
@@ -140,7 +147,7 @@ if filter_taus:
 print(p0)
 
 nb_walkers = 200
-nb_steps = 100
+nb_steps = 1000
 nb_dof = len(p0.values())
 pickle_filename = os.path.join(output_dir, name + '.pkl')
 if start_from_dict:
@@ -152,19 +159,21 @@ fitter = getter_bypass_modeler(
             name=pickle_filename.split('.pkl')[0],
             nb_walkers=nb_walkers,
             p0=p0,
-            function_to_explore='chi2',
+            function_to_explore='lnl',
 #            liquid_flow_lps=0.0,
             liquid_flow_lph=30.0/slpm_per_llpm*60, # liters per minute * minutes per hour
 #            liquid_flow_lps=0.3/60, # liters per minute / seconds per minute
             gas_flow_slph=5.0*60,
             start_from_dict=start_from_dict,
             model_name=model,
+            fit_initial_values=[None, 'n_g_0'],
             )
 
 initial_values = [1.0/taus[0], p0['n_g_0']['guess']]
 if plot_guess:
     par_array = [par['guess'] for par in p0.values()]
     print(fitter.chi2_from_pars(par_array, times, taus, initial_values))
+    print(fitter.lnl_from_pars(par_array, times, taus, initial_values))
 
 
     sol = fitter.solve_ODEs(times, taus, fitter.p_vector_to_dict(par_array), initial_values)[0]
